@@ -3,59 +3,62 @@ import pandas as pd
 from openpyxl import load_workbook
 import io
 import datetime
+import pytesseract
+from PIL import Image
+import re
+import shutil
 
-# Sayfa ayarları
 st.set_page_config(page_title="Ferçim Rapor", page_icon="🏭", layout="centered")
-
 st.title("🏭 Ferçim Niğde - Otomatik Rapor")
-st.markdown("SAP MM ekran görüntülerini yükleyin ve rapor tarihini seçin.")
 
-# Tarih Seçici
 rapor_tarihi = st.date_input("🗓️ Rapor Tarihi", datetime.date.today())
 formatli_tarih = rapor_tarihi.strftime("%d.%m.%Y")
-gun_ismi = str(rapor_tarihi.day) # Seçilen tarihin gün kısmı (örn: "26")
+gun_ismi = str(rapor_tarihi.day)
 
-# Dosya yükleme alanı
 uploaded_files = st.file_uploader("📸 SAP Ekran Görüntülerini Seçin", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
+def parse_sap_image(image_file):
+    # Fotoğrafı metne çevir
+    img = Image.open(image_file)
+    text = pytesseract.image_to_string(img, lang='tur+eng')
+    return text.upper()
+
 if uploaded_files:
-    st.success(f"✅ {len(uploaded_files)} görüntü yüklendi. İşleme hazır.")
+    st.success(f"✅ {len(uploaded_files)} görüntü yüklendi. OCR analizi başlıyor...")
     
     if st.button("🚀 Raporu Oluştur"):
-        with st.spinner('Veriler okunuyor ve Excel hazırlanıyor...'):
+        with st.spinner('Fotoğraflar okunuyor ve veriler ayıklanıyor...'):
             try:
-                # Şablonu yükle (Depondaki dosya adının bu olduğundan emin olun)
+                # Tüm yüklenen fotoğraflardaki metinleri birleştir
+                tum_metin = ""
+                for file in uploaded_files:
+                    tum_metin += parse_sap_image(file)
+                
+                # Şablonu bozmamak için orijinali koruyarak açıyoruz
                 template_path = "Niğde Günlük Rapor 2026_09_24.xlsx"
                 wb = load_workbook(template_path)
+                ws = wb.worksheets[0]
                 
-                # 1. SAYFA ADI GÜNCELLEMESİ
-                ws = wb.worksheets[0] # İlk sayfayı otomatik seç
-                ws.title = gun_ismi # Sayfa adını gün numarası yap (örn: 26)
+                ws.title = gun_ismi
+                ws['A2'] = "" 
+                ws['B2'] = formatli_tarih 
                 
-                # 2. TARİH HÜCRESİ GÜNCELLEMESİ (B2)
-                ws['A2'] = "" # Önceki hatalı A2 kaydını temizle
-                ws['B2'] = formatli_tarih # Doğru hücreye (B2) tarihi yaz
-                
-                # 3. DÖNEM SONU STOKLAR (Geçici OCR Simülasyonu - F Sütunu)
-                # Klinker Dönem Sonu
-                ws['F4'] = 94653.233 
-                # Çimento Kalemleri Dönem Sonu
-                ws['F7'] = 676.000   
-                ws['F8'] = 218.000   
-                ws['F9'] = 173.000   
-                ws['F10'] = 1329.000 
-                # Yakıt Kalemleri Dönem Sonu
-                ws['F13'] = 3655.000 # Petrokok
-                ws['F14'] = 2693.000 # Linyit
-                
-                # Yeni dosyayı belleğe kaydet
+                # --- DİNAMİK VERİ AYIKLAMA (Örnek Mantık) ---
+                # Fotoğrafta "KLINKER GRI" kelimesi geçiyorsa çalıştığını kanıtlar
+                if "KLINKER" in tum_metin or "KLİNKER" in tum_metin:
+                    ws['C3'] = "Görselden Okundu!" # Geçici kontrol metni
+                    ws['D3'] = len(tum_metin) # Okunan toplam karakter sayısını yazar (dinamik olduğunu kanıtlar)
+                else:
+                    ws['C3'] = "Klinker bulunamadı"
+
+                # Sizin tarafınızdan belirtilen hammadde düzeltmesi: Kil yerine Marn kullanımı
+                if "MARN" in tum_metin:
+                    ws['C15'] = "Marn Okundu"
+
                 output = io.BytesIO()
                 wb.save(output)
                 output.seek(0)
                 
-                st.success(f"🎉 {formatli_tarih} tarihli Excel Raporu Başarıyla Dolduruldu!")
-                
-                # DİNAMİK DOSYA İSMİ İLE İNDİRME BUTONU
                 dosya_adi = f"Fercim_Nigde_Gunluk_Rapor_{formatli_tarih}.xlsx"
                 st.download_button(
                     label=f"📥 İndir: {dosya_adi}",
@@ -64,4 +67,4 @@ if uploaded_files:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             except Exception as e:
-                st.error(f"⚠️ Hata: Excel dosyası bulunamadı veya işlenemedi. Detay: {e}")
+                st.error(f"⚠️ Sistemsel Hata: {e}")
